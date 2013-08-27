@@ -275,13 +275,13 @@ static void *tcp_server_thread(void *p_param)
 		close(p_tcp_server_context->p_listen_socket_fd[j]);
 	}
 
-	p_tcp_server_context->tcp_server_exit = TRUE;
-	
 	if (0 != pthread_mutex_lock(&(p_tcp_server_context->mutex)))
 	{
 	}
 	else
 	{
+		p_tcp_server_context->tcp_server_exit = TRUE;
+
 		p_fd_list_node = p_tcp_server_context->p_conn_socket_list;
 		
 		/* There is no receive data thread */
@@ -298,6 +298,7 @@ static void *tcp_server_thread(void *p_param)
 				p_fd_list_node = p_fd_list_node->p_next_node;
 			}
 		}
+		
 		pthread_mutex_unlock(&(p_tcp_server_context->mutex));
 	}
 	
