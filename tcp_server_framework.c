@@ -2,6 +2,7 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <sys/select.h>
+#include <sys/poll.h>
 #include <netdb.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -44,15 +45,13 @@ typedef struct
 {
 	BOOL tcp_server_exit;
 	
-	int max_fd;
 	int manage_socket_fd[2];
 
 	int listen_addr_num;
 	listen_addr *p_listen_addr;
 	int *p_listen_socket_fd;
-
-	fd_set read_fds;
-	fd_set backup_read_fds;
+	
+	struct pollfd *p_poll_fds;
 	
 	pthread_mutex_t mutex;
 	fd_list_node *p_conn_socket_list;
@@ -150,17 +149,10 @@ static tcp_server_context *init_tcp_server_context(listen_addr *p_listen_addr, i
 		goto INIT_TCP_SERVER_CONTEXT_ERR_END;
 	}
 
-	FD_ZERO(&(p_tcp_server_context->read_fds));
-	FD_ZERO(&(p_tcp_server_context->backup_read_fds));
-
-	if (-1 == socketpair(AF_UNIX, SOCK_STREAM, 0, p_tcp_server_context->manage_socket_fd))
+	p_tcp_server_context->p_poll_fds = calloc((listen_addr_num + 1), sizeof(*p_tcp_server_context->p_poll_fds));
+	if (NULL == p_tcp_server_context->p_poll_fds)
 	{
 		goto INIT_TCP_SERVER_CONTEXT_ERR_END;
-	}
-	else
-	{
-		p_tcp_server_context->max_fd = p_tcp_server_context->manage_socket_fd[1];
-		FD_SET(p_tcp_server_context->manage_socket_fd[1], &(p_tcp_server_context->read_fds));
 	}
 
 	p_tcp_server_context->listen_addr_num = listen_addr_num;
@@ -179,14 +171,20 @@ static tcp_server_context *init_tcp_server_context(listen_addr *p_listen_addr, i
 			goto INIT_TCP_SERVER_CONTEXT_ERR_END;
 		}
 
-		if (p_tcp_server_context->p_listen_socket_fd[i] > p_tcp_server_context->max_fd)
-		{
-			p_tcp_server_context->max_fd = p_tcp_server_context->p_listen_socket_fd[i];
-		}
-
-		FD_SET(p_tcp_server_context->p_listen_socket_fd[i], &(p_tcp_server_context->read_fds));
+		p_tcp_server_context->p_poll_fds[i].fd = p_tcp_server_context->p_listen_socket_fd[i];
+		p_tcp_server_context->p_poll_fds[i].events = POLLIN;
 	}
 
+	if (-1 == socketpair(AF_UNIX, SOCK_STREAM, 0, p_tcp_server_context->manage_socket_fd))
+	{
+		goto INIT_TCP_SERVER_CONTEXT_ERR_END;
+	}
+	else
+	{
+		p_tcp_server_context->p_poll_fds[p_tcp_server_context->listen_addr_num].fd = p_tcp_server_context->manage_socket_fd[1];
+		p_tcp_server_context->p_poll_fds[p_tcp_server_context->listen_addr_num].events = POLLIN;
+	}
+	
 	if (0 != pthread_mutex_init(&(p_tcp_server_context->mutex), NULL))
 	{
 		goto INIT_TCP_SERVER_CONTEXT_ERR_END;
@@ -212,19 +210,15 @@ static void *tcp_server_thread(void *p_param)
 	/* code body */
 	while (1)
 	{
-		memcpy(&(p_tcp_server_context->backup_read_fds), &(p_tcp_server_context->read_fds), sizeof(p_tcp_server_context->backup_read_fds));
-
-		ret_val = select(
-					(p_tcp_server_context->max_fd + 1),
-					&(p_tcp_server_context->backup_read_fds),
-					NULL,
-					NULL,
-					NULL);
+		ret_val = poll(
+					p_tcp_server_context->p_poll_fds,
+					(p_tcp_server_context->listen_addr_num + 1),
+					(-1));
 		if (ret_val > 0)
 		{
 			for (j = 0; j < p_tcp_server_context->listen_addr_num; j++)
 			{
-				if (FD_ISSET(p_tcp_server_context->p_listen_socket_fd[j], &(p_tcp_server_context->backup_read_fds)))
+				if (p_tcp_server_context->p_poll_fds[j].revents & POLLIN)
 				{
 					p_fd_list_node = calloc(1, sizeof(*p_fd_list_node));
 					p_fd_list_node->fd = accept(p_tcp_server_context->p_listen_socket_fd[j], NULL, NULL);
@@ -258,7 +252,7 @@ static void *tcp_server_thread(void *p_param)
 					}
 				}
 			}
-			if (FD_ISSET(p_tcp_server_context->manage_socket_fd[1], &(p_tcp_server_context->backup_read_fds)))
+			if (p_tcp_server_context->p_poll_fds[p_tcp_server_context->listen_addr_num].revents & POLLIN)
 			{
 				n = recv(p_tcp_server_context->manage_socket_fd[1], &data, sizeof(data), 0);
 				break;
@@ -274,7 +268,7 @@ static void *tcp_server_thread(void *p_param)
 	{
 		close(p_tcp_server_context->p_listen_socket_fd[j]);
 	}
-
+	
 	if (0 != pthread_mutex_lock(&(p_tcp_server_context->mutex)))
 	{
 	}
