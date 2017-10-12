@@ -13,20 +13,20 @@ typedef void* TCP_SERVER_HANDLE;
 
 typedef struct
 {
-	int fd;
-	char *p_data;
-	int data_len;
-	void *p_user_data;
+    int fd;
+    char *p_data;
+    int data_len;
+    void *p_user_data;
 } recv_data_param;
 
 typedef void (*process_recv_data_func)(recv_data_param *p_recv_data_param);
 
 typedef struct
 {
-	char ip_addr[IP_ADDR_LEN];
-	int port;
-	process_recv_data_func process_func;
-	void *p_user_data;
+    char ip_addr[IP_ADDR_LEN];
+    int port;
+    process_recv_data_func process_func;
+    void *p_user_data;
 } listen_addr;
 
 
